@@ -1,13 +1,17 @@
 import os
 import re
 import asyncio
-import interactions
+import hikari
+import lightbulb
 from dotenv import load_dotenv
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-bot = interactions.Client(token=TOKEN, intents=interactions.Intents.ALL)
+bot = lightbulb.BotApp(
+    token=TOKEN,
+    intents=hikari.Intents.ALL,
+)
 
 SWEAR_REPLACEMENTS = {
     "fuck": "fudge nugget",
@@ -28,9 +32,11 @@ async def get_or_create_webhook(channel):
             return h
     return await channel.create_webhook(name="SwearJar")
 
-@bot.event
-async def on_message_create(message):
-    if message.author.bot:
+@bot.listen(hikari.GuildMessageCreateEvent)
+async def on_message(event):
+    message = event.message
+
+    if not message.content or message.author.is_bot:
         return
 
     original = message.content
@@ -49,14 +55,14 @@ async def on_message_create(message):
     except:
         pass
 
-    webhook = await get_or_create_webhook(message.channel)
+    webhook = await get_or_create_webhook(message.channel_id)
 
     await asyncio.sleep(0.25)
 
     await webhook.execute(
         content=cleaned,
         username=message.author.username,
-        avatar_url=message.author.avatar_url
+        avatar_url=message.author.avatar_url,
     )
 
-bot.start()
+bot.run()
