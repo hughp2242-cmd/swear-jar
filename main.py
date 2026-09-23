@@ -1,17 +1,14 @@
 import os
 import re
 import asyncio
-import hikari
-import lightbulb
 from dotenv import load_dotenv
+import discord
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-bot = lightbulb.BotApp(
-    token=TOKEN,
-    intents=hikari.Intents.ALL,
-)
+intents = discord.Intents.all()
+client = discord.Client(intents=intents)
 
 SWEAR_REPLACEMENTS = {
     "fuck": "fudge nugget",
@@ -26,17 +23,19 @@ SWEAR_REPLACEMENTS = {
 pattern = re.compile(r"\b(" + "|".join(SWEAR_REPLACEMENTS.keys()) + r")\b", re.IGNORECASE)
 
 async def get_or_create_webhook(channel):
-    hooks = await channel.fetch_webhooks()
+    hooks = await channel.webhooks()
     for h in hooks:
         if h.name == "SwearJar":
             return h
     return await channel.create_webhook(name="SwearJar")
 
-@bot.listen(hikari.GuildMessageCreateEvent)
-async def on_message(event):
-    message = event.message
+@client.event
+async def on_ready():
+    print(f"Bot is online as {client.user}")
 
-    if not message.content or message.author.is_bot:
+@client.event
+async def on_message(message):
+    if message.author.bot:
         return
 
     original = message.content
@@ -55,14 +54,14 @@ async def on_message(event):
     except:
         pass
 
-    webhook = await get_or_create_webhook(message.channel_id)
+    webhook = await get_or_create_webhook(message.channel)
 
     await asyncio.sleep(0.25)
 
-    await webhook.execute(
+    await webhook.send(
         content=cleaned,
-        username=message.author.username,
-        avatar_url=message.author.avatar_url,
+        username=message.author.display_name,
+        avatar_url=message.author.display_avatar.url
     )
 
-bot.run()
+client.run(TOKEN)
