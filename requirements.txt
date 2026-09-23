@@ -1,3 +1,2 @@
-hikari==2.0.0.dev121
-hikari-lightbulb==2.3.0
+discord-py-self==1.9.2
 python-dotenv
