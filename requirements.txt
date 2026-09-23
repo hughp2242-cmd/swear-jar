@@ -1,2 +1,3 @@
-interactions.py==5.12.0
+hikari==2.0.0.dev121
+hikari-lightbulb==2.3.0
 python-dotenv
