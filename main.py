@@ -1,5 +1,6 @@
 import os
 import re
+import asyncio
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -39,18 +40,16 @@ async def get_or_create_webhook(channel: discord.TextChannel):
         if hook.name == "SwearJar":
             return hook
 
-    # Create new webhook
     return await channel.create_webhook(name="SwearJar")
 
 @bot.event
 async def on_message(message):
-    # Ignore bot messages
     if message.author.bot:
         return
 
     original = message.content
 
-    # Replace swear words with funny alternatives
+    # Replace swear words
     def replace(match):
         word = match.group(0).lower()
         return SWEAR_REPLACEMENTS.get(word, word)
@@ -62,24 +61,36 @@ async def on_message(message):
         await bot.process_commands(message)
         return
 
-    # Delete the original message
+    # Delete original message
     try:
         await message.delete()
     except:
-        pass  # Bot may not have permission
+        pass
 
-    # Send cleaned message via webhook
+    # Get webhook
     webhook = await get_or_create_webhook(message.channel)
 
-    await webhook.send(
-        content=cleaned,
-        username=message.author.display_name,
-        avatar_url=message.author.display_avatar.url
-    )
+    # Rate-limit protection (max 4 msgs/sec)
+    await asyncio.sleep(0.25)
+
+    # Send via webhook with retry on 429
+    try:
+        await webhook.send(
+            content=cleaned,
+            username=message.author.display_name,
+            avatar_url=message.author.display_avatar.url
+        )
+    except discord.HTTPException as e:
+        if e.status == 429:
+            await asyncio.sleep(e.retry_after)
+            await webhook.send(
+                content=cleaned,
+                username=message.author.display_name,
+                avatar_url=message.author.display_avatar.url
+            )
 
     await bot.process_commands(message)
 
-# Simple command to test bot is alive
 @bot.command()
 async def ping(ctx):
     await ctx.send("Pong!")
