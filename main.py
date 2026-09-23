@@ -1,15 +1,20 @@
 import os
+import time
 import re
-import asyncio
+import httpx
 from dotenv import load_dotenv
-import discord
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
 
-intents = discord.Intents.all()
-client = discord.Client(intents=intents)
+BASE_URL = "https://discord.com/api/v10"
 
+HEADERS = {
+    "Authorization": f"Bot {TOKEN}",
+    "Content-Type": "application/json"
+}
+
+# Swear replacements
 SWEAR_REPLACEMENTS = {
     "fuck": "fudge nugget",
     "shit": "poop pancake",
@@ -22,46 +27,104 @@ SWEAR_REPLACEMENTS = {
 
 pattern = re.compile(r"\b(" + "|".join(SWEAR_REPLACEMENTS.keys()) + r")\b", re.IGNORECASE)
 
-async def get_or_create_webhook(channel):
-    hooks = await channel.webhooks()
-    for h in hooks:
-        if h.name == "SwearJar":
-            return h
-    return await channel.create_webhook(name="SwearJar")
+# Track last message ID to avoid duplicates
+last_message_id = {}
 
-@client.event
-async def on_ready():
-    print(f"Bot is online as {client.user}")
-
-@client.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    original = message.content
-
-    def replace(match):
+def replace_swears(text):
+    def repl(match):
         word = match.group(0).lower()
         return SWEAR_REPLACEMENTS.get(word, word)
+    return pattern.sub(repl, text)
 
-    cleaned = pattern.sub(replace, original)
+def get_messages(channel_id):
+    url = f"{BASE_URL}/channels/{channel_id}/messages?limit=10"
+    r = httpx.get(url, headers=HEADERS)
+    if r.status_code == 200:
+        return r.json()
+    return []
 
-    if cleaned == original:
+def delete_message(channel_id, message_id):
+    url = f"{BASE_URL}/channels/{channel_id}/messages/{message_id}"
+    httpx.delete(url, headers=HEADERS)
+
+def get_or_create_webhook(channel_id):
+    # Get existing webhooks
+    url = f"{BASE_URL}/channels/{channel_id}/webhooks"
+    r = httpx.get(url, headers=HEADERS)
+    if r.status_code == 200:
+        hooks = r.json()
+        for h in hooks:
+            if h["name"] == "SwearJar":
+                return h["id"], h["token"]
+
+    # Create new webhook
+    url = f"{BASE_URL}/channels/{channel_id}/webhooks"
+    r = httpx.post(url, headers=HEADERS, json={"name": "SwearJar"})
+    data = r.json()
+    return data["id"], data["token"]
+
+def send_webhook(webhook_id, webhook_token, content, username, avatar_url):
+    url = f"https://discord.com/api/webhooks/{webhook_id}/{webhook_token}"
+    httpx.post(url, json={
+        "content": content,
+        "username": username,
+        "avatar_url": avatar_url
+    })
+
+def poll_channel(channel_id):
+    global last_message_id
+
+    messages = get_messages(channel_id)
+    if not messages:
         return
 
-    try:
-        await message.delete()
-    except:
-        pass
+    # Sort newest → oldest
+    messages = sorted(messages, key=lambda m: int(m["id"]), reverse=True)
 
-    webhook = await get_or_create_webhook(message.channel)
+    for msg in messages:
+        mid = msg["id"]
 
-    await asyncio.sleep(0.25)
+        # Skip already processed messages
+        if last_message_id.get(channel_id) == mid:
+            continue
 
-    await webhook.send(
-        content=cleaned,
-        username=message.author.display_name,
-        avatar_url=message.author.display_avatar.url
-    )
+        last_message_id[channel_id] = mid
 
-client.run(TOKEN)
+        # Skip bot messages
+        if msg.get("author", {}).get("bot"):
+            continue
+
+        content = msg.get("content", "")
+        cleaned = replace_swears(content)
+
+        if cleaned != content:
+            # Delete original
+            delete_message(channel_id, mid)
+
+            # Send webhook replacement
+            webhook_id, webhook_token = get_or_create_webhook(channel_id)
+            send_webhook(
+                webhook_id,
+                webhook_token,
+                cleaned,
+                msg["author"]["username"],
+                msg["author"]["avatar"]
+            )
+
+def main():
+    print("Bot is running (REST mode)...")
+
+    # Put your channel IDs here
+    CHANNELS = [
+        # Example:
+        # 123456789012345678
+    ]
+
+    while True:
+        for cid in CHANNELS:
+            poll_channel(cid)
+
+        time.sleep(2)  # Poll every 2 seconds
+
+if __name__ == "__main__":
+    main()
