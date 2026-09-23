@@ -1,2 +1,2 @@
-py-cord==2.4.1
+interactions.py==5.12.0
 python-dotenv
